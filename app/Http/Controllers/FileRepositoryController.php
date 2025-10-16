@@ -127,20 +127,45 @@ class FileRepositoryController extends Controller
 
             $validated = $request->validate([
                 'folder_id' => 'nullable|exists:folders,id',
-                'file' => 'required|file|max:10240',
+                'file' => 'required|file|max:10240', // 10MB limit
             ]);
 
             $file = $request->file('file');
-            $filePath = $file->store('uploads/files', 'public');
 
+            // Determine target directory
+            $folder = null;
+            $folderPath = 'user_' . $user->full_name; // Default user root
+
+            if (!empty($validated['folder_id'])) {
+                $folder = Folder::where('id', $validated['folder_id'])
+                    ->where('user_id', $user->id)
+                    ->first();
+
+                if ($folder) {
+                    // Use folder's path from DB if exists
+                    $folderPath = $folder->path ?? $folderPath;
+                }
+            }
+
+            // Ensure the folder exists in storage
+            Storage::disk('public')->makeDirectory($folderPath);
+
+            // Store the file inside the correct folder
+            $storedFilePath = $file->store($folderPath, 'public');
+
+            // Save file info in DB
             $newFile = File::create([
                 'user_id' => $user->id,
                 'folder_id' => $validated['folder_id'] ?? null,
                 'file_name' => $file->getClientOriginalName(),
-                'file_path' => $filePath,
+                'file_path' => $storedFilePath,
                 'file_type' => $file->getClientMimeType(),
                 'file_size' => $file->getSize(),
+                'is_archived' => false,
             ]);
+
+            // Add public asset URL for easy frontend access
+            $newFile->file_url = asset('storage/' . $storedFilePath);
 
             return response()->json([
                 'isSuccess' => true,
@@ -155,6 +180,7 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
+
 
 
     /**

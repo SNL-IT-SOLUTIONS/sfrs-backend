@@ -1,0 +1,6 @@
+Employee,Date,Check In,Check Out,Hours Worked,Status
+John Doe,2025-10-09,N/A,N/A,8.5,present
+Jane Smith,2025-10-09,N/A,N/A,8.5,late
+Robert Wilson,2025-10-09,N/A,N/A,8.25,present
+Sarah Johnson,2025-10-09,N/A,N/A,9.5,present
+Michael Brown,2025-10-09,N/A,N/A,N/A,absent
