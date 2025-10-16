@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 class AuthController extends Controller
 {
     /**
-     * 🔐 User Login
+     * User Login
      */
     public function login(Request $request)
     {
@@ -44,6 +44,14 @@ class AuthController extends Controller
                 ], 403);
             }
 
+            // NEW: Check if user is approved
+            if (!$user->is_approved) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Account has not been approved yet. Please wait for admin approval.',
+                ], 403);
+            }
+
             // Generate a new Sanctum token
             $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -56,7 +64,6 @@ class AuthController extends Controller
                     'full_name' => $user->full_name,
                     'email' => $user->email,
                     'role' => $user->role,
-
                 ],
             ], 200);
         } catch (\Exception $e) {
@@ -68,6 +75,7 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
 
     /**
      * 🚪 Logout User (Revoke Token)
