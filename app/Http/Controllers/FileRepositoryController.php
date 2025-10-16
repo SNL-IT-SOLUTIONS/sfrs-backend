@@ -261,25 +261,40 @@ class FileRepositoryController extends Controller
         try {
             $user = auth()->user();
 
+            if (!$user) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Unauthorized access.'
+                ], 401);
+            }
+
+            // Get the file record that belongs to the authenticated user
             $file = File::where('id', $fileId)
                 ->where('user_id', $user->id)
                 ->firstOrFail();
 
+            // Construct full path including subfolders
             $filePath = storage_path('app/public/' . $file->file_path);
 
             if (!file_exists($filePath)) {
                 return response()->json([
                     'isSuccess' => false,
-                    'message' => 'File not found.',
+                    'message' => 'File not found on server.'
                 ], 404);
             }
 
-            return response()->download($filePath, $file->file_name);
-        } catch (Exception $e) {
-            Log::error('Error downloading file: ' . $e->getMessage());
+            // Proper download response
+            return response()->download($filePath, $file->original_name ?? basename($filePath));
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'isSuccess' => false,
-                'message' => 'Failed to download file.',
+                'message' => 'File not found.'
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'An error occurred while downloading the file.',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
