@@ -54,4 +54,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('all-repositories', [PrincipalController::class, 'viewAllRepositories']);
     Route::get('pending-users', [PrincipalController::class, 'getPendingUsers']);
     Route::post('approve-user/{id}', [PrincipalController::class, 'approveUser']);
+    Route::post('reject-user/{id}', [PrincipalController::class, 'rejectUser']);
+    Route::get('history', [PrincipalController::class, 'getApprovalHistory']);
 });

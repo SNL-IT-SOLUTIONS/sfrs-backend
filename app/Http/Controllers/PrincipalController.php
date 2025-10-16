@@ -7,6 +7,7 @@ use App\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\Folder;
+use Illuminate\Support\Facades\DB;
 
 
 class PrincipalController extends Controller
@@ -130,6 +131,8 @@ class PrincipalController extends Controller
         }
     }
 
+
+
     /**
      * Approve a user registration
      */
@@ -137,6 +140,7 @@ class PrincipalController extends Controller
     {
         try {
             $user = User::find($id);
+            $admin = auth()->user(); // The one performing the action
 
             if (!$user) {
                 return response()->json([
@@ -147,6 +151,14 @@ class PrincipalController extends Controller
 
             $user->is_approved = true;
             $user->save();
+
+            // Log the approval
+            DB::table('user_approvals')->insert([
+                'user_id' => $user->id,
+                'action' => 'approved',
+                'performed_by' => $admin->id,
+                'created_at' => now()
+            ]);
 
             return response()->json([
                 'isSuccess' => true,
@@ -159,6 +171,77 @@ class PrincipalController extends Controller
             return response()->json([
                 'isSuccess' => false,
                 'message' => 'Failed to approve user.',
+            ], 500);
+        }
+    }
+
+    public function rejectUser($id)
+    {
+        try {
+            $user = User::find($id);
+            $admin = auth()->user(); // The one performing the action
+
+            if (!$user) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'User not found.',
+                ], 404);
+            }
+
+            $user->is_approved = false;
+            $user->save();
+
+            // Log the rejection
+            DB::table('user_approvals')->insert([
+                'user_id' => $user->id,
+                'action' => 'rejected',
+                'performed_by' => $admin->id,
+                'created_at' => now()
+            ]);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'User rejected successfully.',
+                'data' => $user,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error rejecting user: ' . $e->getMessage());
+
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to reject user.',
+            ], 500);
+        }
+    }
+
+
+    public function getApprovalHistory()
+    {
+        try {
+            $history = DB::table('user_approvals')
+                ->join('users as u', 'user_approvals.user_id', '=', 'u.id')
+                ->join('users as admin', 'user_approvals.performed_by', '=', 'admin.id')
+                ->select(
+                    'user_approvals.id',
+                    'u.full_name as user_name',
+                    'action',
+                    'admin.full_name as performed_by',
+                    'user_approvals.created_at'
+                )
+                ->orderBy('user_approvals.created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Approval history retrieved successfully.',
+                'data' => $history,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching approval history: ' . $e->getMessage());
+
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to fetch approval history.',
             ], 500);
         }
     }
