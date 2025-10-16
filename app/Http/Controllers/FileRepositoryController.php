@@ -274,7 +274,10 @@ class FileRepositoryController extends Controller
                 ], 404);
             }
 
-            return response()->download($filePath, $file->file_name);
+            // Force download with generic binary type
+            return response()->download($filePath, $file->file_name, [
+                'Content-Type' => 'application/octet-stream',
+            ]);
         } catch (Exception $e) {
             Log::error('Error downloading file: ' . $e->getMessage());
             return response()->json([
