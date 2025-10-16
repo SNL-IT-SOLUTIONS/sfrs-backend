@@ -17,30 +17,33 @@ class PrincipalController extends Controller
     public function viewAllRepositories()
     {
         try {
-            // Fetch ALL folders from all users (root level)
+            // Fetch all folders from all users (root level)
             $folders = Folder::whereNull('parent_id')
                 ->with([
                     'children' => function ($query) {
                         $query->with([
                             'files',
                             'children' => function ($subQuery) {
-                                $subQuery->with('files');
+                                $subQuery->with('files'); // recursion level 2
                             },
+                            'user'
                         ]);
                     },
                     'files',
-                    'user' // ✅ include user info for identification
+                    'user' // include user info
                 ])
                 ->get();
 
-            // ✅ Fetch ALL root files (not inside any folder)
+            // Fetch all root files (not inside any folder)
             $rootFiles = File::whereNull('folder_id')
                 ->with('user')
                 ->get();
 
-            // Attach folder and file URLs
+            // Attach URLs and user full names
             $folders->each(function ($folder) {
                 $user = $folder->user;
+                $folder->user_full_name = $user ? $user->full_name : 'Unknown User';
+
                 $userFolderPrefix = $user
                     ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
                     : '';
@@ -48,27 +51,34 @@ class PrincipalController extends Controller
                 $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
                 $folder->folder_url = asset('storage/' . $cleanFolderPath);
 
-                // Attach file URLs in folder
-                $folder->files->each(function ($file) use ($userFolderPrefix) {
+                // Folder files
+                $folder->files->each(function ($file) use ($userFolderPrefix, $user) {
+                    $file->user_full_name = $user ? $user->full_name : 'Unknown User';
                     $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                     $file->file_url = asset('storage/' . $cleanPath);
                 });
 
-                // Attach file URLs in subfolders
+                // Child folders
                 $folder->children->each(function ($child) use ($userFolderPrefix) {
+                    $childUser = $child->user;
+                    $child->user_full_name = $childUser ? $childUser->full_name : 'Unknown User';
+
                     $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
                     $child->folder_url = asset('storage/' . $cleanChildPath);
 
-                    $child->files->each(function ($file) use ($userFolderPrefix) {
+                    $child->files->each(function ($file) use ($userFolderPrefix, $childUser) {
+                        $file->user_full_name = $childUser ? $childUser->full_name : 'Unknown User';
                         $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                         $file->file_url = asset('storage/' . $cleanPath);
                     });
                 });
             });
 
-            // ✅ Attach URLs for root files (those not inside any folder)
+            // Attach URLs and user names for root files
             $rootFiles->each(function ($file) {
                 $user = $file->user;
+                $file->user_full_name = $user ? $user->full_name : 'Unknown User';
+
                 $userFolderPrefix = $user
                     ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
                     : '';
@@ -81,8 +91,8 @@ class PrincipalController extends Controller
                 'isSuccess' => true,
                 'message' => 'All repositories loaded successfully.',
                 'data' => [
-                    'root_files' => $rootFiles,
                     'folders' => $folders,
+                    'files' => $rootFiles,
                 ],
             ]);
         } catch (\Exception $e) {
@@ -94,6 +104,7 @@ class PrincipalController extends Controller
             ], 500);
         }
     }
+
 
 
     /**
