@@ -185,27 +185,27 @@ class FileRepositoryController extends Controller
 
             // Always sanitize user name
             $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
-            $folderPath = 'user_' . $safeUserName; // default: root directory
+            $folderPath = 'user_' . $safeUserName; // default to user's root folder
 
-            // ✅ If uploading into a subfolder
             if (!empty($validated['folder_id'])) {
                 $folder = Folder::where('id', $validated['folder_id'])
                     ->where('user_id', $user->id)
                     ->first();
 
                 if ($folder) {
-                    // Use folder path directly from DB (already user-based)
-                    $folderPath = $folder->path;
+                    // Make sure we include the subfolder name
+                    $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $folder->folder_name);
+                    $folderPath = ($folder->path ?? $folderPath) . '/' . $safeFolderName;
                 }
             }
 
-            // Ensure directory exists
+            // Ensure the folder exists in storage
             Storage::disk('public')->makeDirectory($folderPath);
 
-            // Store file
+            // Store the file inside the correct folder
             $filePath = $file->store($folderPath, 'public');
 
-            // Save file in DB
+            // Save file info in DB
             $newFile = File::create([
                 'user_id' => $user->id,
                 'folder_id' => $validated['folder_id'] ?? null,
@@ -216,7 +216,7 @@ class FileRepositoryController extends Controller
                 'is_archived' => false,
             ]);
 
-            // Public file URL (frontend ready)
+            // Add public asset URL for frontend
             $newFile->file_url = asset('storage/' . $filePath);
 
             return response()->json([
