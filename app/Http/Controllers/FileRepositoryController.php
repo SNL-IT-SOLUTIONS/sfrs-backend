@@ -13,26 +13,6 @@ use Illuminate\Support\Facades\DB;
 
 class FileRepositoryController extends Controller
 {
-    /**
-     * Get all folders and files for a user
-     */
-    public function getRepository($userId)
-    {
-        try {
-            $folders = Folder::where('user_id', $userId)
-                ->whereNull('parent_id')
-                ->with('children', 'files')
-                ->get();
-
-            return response()->json([
-                'isSuccess' => true,
-                'data' => $folders,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error fetching repository: ' . $e->getMessage());
-            return response()->json(['isSuccess' => false, 'message' => 'Failed to load repository.'], 500);
-        }
-    }
 
     public function getMyRepository(Request $request)
     {
@@ -245,38 +225,38 @@ class FileRepositoryController extends Controller
     /**
      * 🗑️ Delete a file or folder
      */
-    public function deleteItem(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'type' => 'required|in:file,folder',
-                'id' => 'required|integer',
-            ]);
+    // public function deleteItem(Request $request)
+    // {
+    //     try {
+    //         $validated = $request->validate([
+    //             'type' => 'required|in:file,folder',
+    //             'id' => 'required|integer',
+    //         ]);
 
-            if ($validated['type'] === 'file') {
-                $file = File::find($validated['id']);
-                if ($file) {
-                    $file->update(['is_archived' => true]);
-                }
-            } else {
-                $folder = Folder::find($validated['id']);
-                if ($folder) {
-                    $folder->update(['is_archived' => true]);
-                }
-            }
+    //         if ($validated['type'] === 'file') {
+    //             $file = File::find($validated['id']);
+    //             if ($file) {
+    //                 $file->update(['is_archived' => true]);
+    //             }
+    //         } else {
+    //             $folder = Folder::find($validated['id']);
+    //             if ($folder) {
+    //                 $folder->update(['is_archived' => true]);
+    //             }
+    //         }
 
-            return response()->json([
-                'isSuccess' => true,
-                'message' => ucfirst($validated['type']) . ' archived successfully.',
-            ]);
-        } catch (Exception $e) {
-            Log::error('Error archiving item: ' . $e->getMessage());
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Failed to archive item.',
-            ], 500);
-        }
-    }
+    //         return response()->json([
+    //             'isSuccess' => true,
+    //             'message' => ucfirst($validated['type']) . ' archived successfully.',
+    //         ]);
+    //     } catch (Exception $e) {
+    //         Log::error('Error archiving item: ' . $e->getMessage());
+    //         return response()->json([
+    //             'isSuccess' => false,
+    //             'message' => 'Failed to archive item.',
+    //         ], 500);
+    //     }
+    // }
 
 
     /**
