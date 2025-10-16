@@ -36,7 +36,7 @@ Route::controller(UserController::class)->group(function () {
     Route::post('updat/users/{id}', 'updateUser');
     Route::post('users/{id}/archive', 'archiveUser');
 });
-
+//TEST
 
 //File Repository
 Route::middleware(['auth:sanctum'])->group(function () {
