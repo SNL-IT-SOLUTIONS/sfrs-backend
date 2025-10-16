@@ -6,6 +6,7 @@ use App\Http\Controllers\BaseController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\FileRepositoryController;
+use App\Http\Controllers\PrincipalController;
 
 /*
 |--------------------------------------------------------------------------
@@ -46,4 +47,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/file/upload', [FileRepositoryController::class, 'uploadFile']);
     Route::get('download/{fileId}', [FileRepositoryController::class, 'downloadFile']);
     Route::delete('files/{fileId}', [FileRepositoryController::class, 'deleteFile']);
+});
+
+//Principal
+Route::middleware(['auth:sanctum'])->group(function () {
+    Route::get('all-repositories', [PrincipalController::class, 'viewAllRepositories']);
+    Route::get('pending-users', [PrincipalController::class, 'getPendingUsers']);
+    Route::post('approve-user/{id}', [PrincipalController::class, 'approveUser']);
 });
