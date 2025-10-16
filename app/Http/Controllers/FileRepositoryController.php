@@ -99,13 +99,20 @@ class FileRepositoryController extends Controller
                 $file->file_url = asset('storage/' . $cleanPath);
             });
 
+            // 🧩 Merge root files into the same structure as folders
+            $repository = $folders->toArray(); // convert to array for merging
+            $repository[] = [
+                'id' => null,
+                'folder_name' => 'root',
+                'folder_url' => asset('storage/'),
+                'files' => $rootFiles,
+                'children' => [],
+            ];
+
             return response()->json([
                 'isSuccess' => true,
                 'message' => 'Repository loaded successfully.',
-                'data' => [
-                    'root_files' => $rootFiles,
-                    'folders' => $folders,
-                ],
+                'data' => $repository,
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching user repository: ' . $e->getMessage());
@@ -116,6 +123,7 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
+
 
 
 
