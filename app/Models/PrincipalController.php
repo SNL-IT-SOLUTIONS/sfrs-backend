@@ -12,30 +12,87 @@ class PrincipalController extends Controller
     /**
      * View all uploaded files in the repository (across all users)
      */
-    public function viewAllFiles()
+    public function viewAllRepositories()
     {
         try {
-            $files = File::with('folder.user')->get();
+            // Fetch ALL folders from all users (root level)
+            $folders = Folder::whereNull('parent_id')
+                ->with([
+                    'children' => function ($query) {
+                        $query->with([
+                            'files',
+                            'children' => function ($subQuery) {
+                                $subQuery->with('files');
+                            },
+                        ]);
+                    },
+                    'files',
+                    'user' // ✅ include user info for identification
+                ])
+                ->get();
 
-            // Add full URL for file access
-            $files->each(function ($file) {
-                $file->file_url = asset('storage/' . $file->file_path);
+            // ✅ Fetch ALL root files (not inside any folder)
+            $rootFiles = File::whereNull('folder_id')
+                ->with('user')
+                ->get();
+
+            // Attach folder and file URLs
+            $folders->each(function ($folder) {
+                $user = $folder->user;
+                $userFolderPrefix = $user
+                    ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
+                    : '';
+
+                $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
+                $folder->folder_url = asset('storage/' . $cleanFolderPath);
+
+                // Attach file URLs in folder
+                $folder->files->each(function ($file) use ($userFolderPrefix) {
+                    $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                    $file->file_url = asset('storage/' . $cleanPath);
+                });
+
+                // Attach file URLs in subfolders
+                $folder->children->each(function ($child) use ($userFolderPrefix) {
+                    $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
+                    $child->folder_url = asset('storage/' . $cleanChildPath);
+
+                    $child->files->each(function ($file) use ($userFolderPrefix) {
+                        $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                        $file->file_url = asset('storage/' . $cleanPath);
+                    });
+                });
+            });
+
+            // ✅ Attach URLs for root files (those not inside any folder)
+            $rootFiles->each(function ($file) {
+                $user = $file->user;
+                $userFolderPrefix = $user
+                    ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
+                    : '';
+
+                $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                $file->file_url = asset('storage/' . $cleanPath);
             });
 
             return response()->json([
                 'isSuccess' => true,
-                'message' => 'All uploaded files retrieved successfully.',
-                'data' => $files,
+                'message' => 'All repositories loaded successfully.',
+                'data' => [
+                    'root_files' => $rootFiles,
+                    'folders' => $folders,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error retrieving files: ' . $e->getMessage());
+            Log::error('Error fetching all repositories: ' . $e->getMessage());
 
             return response()->json([
                 'isSuccess' => false,
-                'message' => 'Failed to load files.',
+                'message' => 'Failed to load repositories.',
             ], 500);
         }
     }
+
 
     /**
      * View all users pending approval
