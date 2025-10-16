@@ -46,6 +46,7 @@ class FileRepositoryController extends Controller
                 ], 401);
             }
 
+            // Fetch all folders that belong to the user (root level)
             $folders = Folder::where('user_id', $user->id)
                 ->whereNull('parent_id')
                 ->with([
@@ -53,7 +54,7 @@ class FileRepositoryController extends Controller
                         $query->with([
                             'files',
                             'children' => function ($subQuery) {
-                                $subQuery->with('files');
+                                $subQuery->with('files'); // recursion level 2
                             },
                         ]);
                     },
@@ -61,20 +62,26 @@ class FileRepositoryController extends Controller
                 ])
                 ->get();
 
+            // ✅ Fetch root files (those not inside any folder)
+            $rootFiles = File::where('user_id', $user->id)
+                ->whereNull('folder_id')
+                ->get();
+
             $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/';
 
+            // Attach folder URLs and file URLs
             $folders->each(function ($folder) use ($userFolderPrefix) {
                 // Base folder URL (without user_ prefix)
                 $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
                 $folder->folder_url = asset('storage/' . $cleanFolderPath);
 
-                // Add URLs for files
+                // Add URLs for files inside the folder
                 $folder->files->each(function ($file) use ($userFolderPrefix) {
                     $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                     $file->file_url = asset('storage/' . $cleanPath);
                 });
 
-                // Children folders
+                // For subfolders
                 $folder->children->each(function ($child) use ($userFolderPrefix) {
                     $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
                     $child->folder_url = asset('storage/' . $cleanChildPath);
@@ -86,10 +93,19 @@ class FileRepositoryController extends Controller
                 });
             });
 
+            // ✅ Add public URLs for root files
+            $rootFiles->each(function ($file) use ($userFolderPrefix) {
+                $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                $file->file_url = asset('storage/' . $cleanPath);
+            });
+
             return response()->json([
                 'isSuccess' => true,
                 'message' => 'Repository loaded successfully.',
-                'data' => $folders,
+                'data' => [
+                    'root_files' => $rootFiles,
+                    'folders' => $folders,
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching user repository: ' . $e->getMessage());
@@ -100,6 +116,7 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
+
 
 
 
