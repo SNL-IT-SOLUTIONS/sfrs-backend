@@ -49,19 +49,18 @@ class FileRepositoryController extends Controller
 
             $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/';
 
-            // Attach folder URLs and file URLs
+            // Attach URLs for folders and files
             $folders->each(function ($folder) use ($userFolderPrefix) {
-                // Base folder URL (without user_ prefix)
                 $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
                 $folder->folder_url = asset('storage/' . $cleanFolderPath);
 
-                // Add URLs for files inside the folder
+                // Folder files
                 $folder->files->each(function ($file) use ($userFolderPrefix) {
                     $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                     $file->file_url = asset('storage/' . $cleanPath);
                 });
 
-                // For subfolders
+                // Child folders
                 $folder->children->each(function ($child) use ($userFolderPrefix) {
                     $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
                     $child->folder_url = asset('storage/' . $cleanChildPath);
@@ -73,26 +72,20 @@ class FileRepositoryController extends Controller
                 });
             });
 
-            // ✅ Add public URLs for root files
+            // ✅ Add URLs for root files
             $rootFiles->each(function ($file) use ($userFolderPrefix) {
                 $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                 $file->file_url = asset('storage/' . $cleanPath);
             });
 
-            // 🧩 Merge root files into the same structure as folders
-            $repository = $folders->toArray(); // convert to array for merging
-            $repository[] = [
-                'id' => null,
-                'folder_name' => 'root',
-                'folder_url' => asset('storage/'),
-                'files' => $rootFiles,
-                'children' => [],
-            ];
-
+            // ✅ Combine them cleanly (no "root" folder)
             return response()->json([
                 'isSuccess' => true,
                 'message' => 'Repository loaded successfully.',
-                'data' => $repository,
+                'data' => [
+                    'folders' => $folders,
+                    'files' => $rootFiles,
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching user repository: ' . $e->getMessage());
@@ -103,6 +96,7 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
+
 
 
 
