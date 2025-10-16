@@ -34,73 +34,72 @@ class FileRepositoryController extends Controller
         }
     }
 
-   public function getMyRepository(Request $request)
-{
-    try {
-        $user = auth()->user();
+    public function getMyRepository(Request $request)
+    {
+        try {
+            $user = auth()->user();
 
-        if (!$user) {
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Unauthorized access.',
-            ], 401);
-        }
+            if (!$user) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Unauthorized access.',
+                ], 401);
+            }
 
-        $folders = Folder::where('user_id', $user->id)
-            ->whereNull('parent_id')
-            ->with([
-                'children' => function ($query) {
-                    $query->with([
-                        'files',
-                        'children' => function ($subQuery) {
-                            $subQuery->with('files');
-                        },
-                    ]);
-                },
-                'files'
-            ])
-            ->get();
+            $folders = Folder::where('user_id', $user->id)
+                ->whereNull('parent_id')
+                ->with([
+                    'children' => function ($query) {
+                        $query->with([
+                            'files',
+                            'children' => function ($subQuery) {
+                                $subQuery->with('files');
+                            },
+                        ]);
+                    },
+                    'files'
+                ])
+                ->get();
 
-        $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/';
+            $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/';
 
-        $folders->each(function ($folder) use ($userFolderPrefix) {
-            // Base folder URL (without user_ prefix)
-            $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
-            $folder->folder_url = asset('storage/' . $cleanFolderPath);
+            $folders->each(function ($folder) use ($userFolderPrefix) {
+                // Base folder URL (without user_ prefix)
+                $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
+                $folder->folder_url = asset('storage/' . $cleanFolderPath);
 
-            // Add URLs for files
-            $folder->files->each(function ($file) use ($userFolderPrefix) {
-                $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
-                $file->file_url = asset('storage/' . $cleanPath);
-            });
-
-            // Children folders
-            $folder->children->each(function ($child) use ($userFolderPrefix) {
-                $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
-                $child->folder_url = asset('storage/' . $cleanChildPath);
-
-                $child->files->each(function ($file) use ($userFolderPrefix) {
+                // Add URLs for files
+                $folder->files->each(function ($file) use ($userFolderPrefix) {
                     $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
                     $file->file_url = asset('storage/' . $cleanPath);
                 });
+
+                // Children folders
+                $folder->children->each(function ($child) use ($userFolderPrefix) {
+                    $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
+                    $child->folder_url = asset('storage/' . $cleanChildPath);
+
+                    $child->files->each(function ($file) use ($userFolderPrefix) {
+                        $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                        $file->file_url = asset('storage/' . $cleanPath);
+                    });
+                });
             });
-        });
 
-        return response()->json([
-            'isSuccess' => true,
-            'message' => 'Repository loaded successfully.',
-            'data' => $folders,
-        ]);
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Repository loaded successfully.',
+                'data' => $folders,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching user repository: ' . $e->getMessage());
 
-    } catch (\Exception $e) {
-        Log::error('Error fetching user repository: ' . $e->getMessage());
-
-        return response()->json([
-            'isSuccess' => false,
-            'message' => 'Failed to load repository.',
-        ], 500);
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to load repository.',
+            ], 500);
+        }
     }
-}
 
 
 
@@ -169,27 +168,27 @@ class FileRepositoryController extends Controller
 
             // Always sanitize user name
             $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
-            $folderPath = 'user_' . $safeUserName; // default to user's root folder
+            $folderPath = 'user_' . $safeUserName; // default: root directory
 
+            // ✅ If uploading into a subfolder
             if (!empty($validated['folder_id'])) {
                 $folder = Folder::where('id', $validated['folder_id'])
                     ->where('user_id', $user->id)
                     ->first();
 
                 if ($folder) {
-                    // Make sure we include the subfolder name
-                    $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $folder->folder_name);
-                    $folderPath = ($folder->path ?? $folderPath) . '/' . $safeFolderName;
+                    // Use folder path directly from DB (already user-based)
+                    $folderPath = $folder->path;
                 }
             }
 
-            // Ensure the folder exists in storage
+            // Ensure directory exists
             Storage::disk('public')->makeDirectory($folderPath);
 
-            // Store the file inside the correct folder
+            // Store file
             $filePath = $file->store($folderPath, 'public');
 
-            // Save file info in DB
+            // Save file in DB
             $newFile = File::create([
                 'user_id' => $user->id,
                 'folder_id' => $validated['folder_id'] ?? null,
@@ -200,7 +199,7 @@ class FileRepositoryController extends Controller
                 'is_archived' => false,
             ]);
 
-            // Add public asset URL for frontend
+            // Public file URL (frontend ready)
             $newFile->file_url = asset('storage/' . $filePath);
 
             return response()->json([
@@ -216,7 +215,6 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
-
 
 
     /**
