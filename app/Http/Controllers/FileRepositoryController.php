@@ -5,14 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\File;
 use App\Models\Folder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Exception;
+use Illuminate\Support\Facades\DB;
+
 
 class FileRepositoryController extends Controller
 {
-    /**
-     * 🗂 Get user repository (folders + files)
-     */
+
     public function getMyRepository(Request $request)
     {
         try {
@@ -25,37 +26,59 @@ class FileRepositoryController extends Controller
                 ], 401);
             }
 
-            // Fetch root folders with children and files
+            // Fetch all folders that belong to the user (root level)
             $folders = Folder::where('user_id', $user->id)
                 ->whereNull('parent_id')
                 ->with([
                     'children' => function ($query) {
-                        $query->with(['files', 'children.files']);
+                        $query->with([
+                            'files',
+                            'children' => function ($subQuery) {
+                                $subQuery->with('files'); // recursion level 2
+                            },
+                        ]);
                     },
                     'files'
                 ])
                 ->get();
 
-            // Fetch root files (not in any folder)
+            // ✅ Fetch root files (those not inside any folder)
             $rootFiles = File::where('user_id', $user->id)
                 ->whereNull('folder_id')
                 ->get();
 
-            $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->full_name) . '/';
+            $userFolderPrefix = 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/';
 
-            // Add URLs for folders and files recursively
+            // Attach URLs for folders and files
             $folders->each(function ($folder) use ($userFolderPrefix) {
-                $folder->folder_url = asset($folder->path ?? '');
-                $folder->files->each(fn($file) => $file->file_url = asset($file->file_path));
-                $folder->children->each(function ($child) {
-                    $child->folder_url = asset($child->path ?? '');
-                    $child->files->each(fn($file) => $file->file_url = asset($file->file_path));
+                $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
+                $folder->folder_url = asset('storage/' . $cleanFolderPath);
+
+                // Folder files
+                $folder->files->each(function ($file) use ($userFolderPrefix) {
+                    $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                    $file->file_url = asset('storage/' . $cleanPath);
+                });
+
+                // Child folders
+                $folder->children->each(function ($child) use ($userFolderPrefix) {
+                    $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
+                    $child->folder_url = asset('storage/' . $cleanChildPath);
+
+                    $child->files->each(function ($file) use ($userFolderPrefix) {
+                        $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                        $file->file_url = asset('storage/' . $cleanPath);
+                    });
                 });
             });
 
-            // Add URLs for root files
-            $rootFiles->each(fn($file) => $file->file_url = asset($file->file_path));
+            // ✅ Add URLs for root files
+            $rootFiles->each(function ($file) use ($userFolderPrefix) {
+                $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
+                $file->file_url = asset('storage/' . $cleanPath);
+            });
 
+            // ✅ Combine them cleanly (no "root" folder)
             return response()->json([
                 'isSuccess' => true,
                 'message' => 'Repository loaded successfully.',
@@ -66,6 +89,7 @@ class FileRepositoryController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching user repository: ' . $e->getMessage());
+
             return response()->json([
                 'isSuccess' => false,
                 'message' => 'Failed to load repository.',
@@ -73,8 +97,13 @@ class FileRepositoryController extends Controller
         }
     }
 
+
+
+
+
+
     /**
-     * 🗂 Create a new folder in public directory
+     *  Create a new folder
      */
     public function createFolder(Request $request)
     {
@@ -86,7 +115,7 @@ class FileRepositoryController extends Controller
                 'parent_id' => 'nullable|exists:folders,id',
             ]);
 
-            // Create DB record first
+            // Create folder in database
             $folder = Folder::create([
                 'user_id' => $user->id,
                 'folder_name' => $validated['folder_name'],
@@ -94,23 +123,16 @@ class FileRepositoryController extends Controller
                 'is_archived' => false,
             ]);
 
-            // Build folder path dynamically
-            $userFolderPrefix = 'user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
-
-            if (!empty($validated['parent_id'])) {
-                $parentFolder = Folder::find($validated['parent_id']);
-                if ($parentFolder) {
-                    $userFolderPrefix = $parentFolder->path;
-                }
-            }
-
+            // Make user name and folder name URL-safe
+            $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
             $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
-            $folderPath = $userFolderPrefix . '/' . $safeFolderName;
+            $path = 'user_' . $safeUserName . '/' . $safeFolderName;
 
-            // Create folder in public
-            $this->makePublicFolder($folderPath);
 
-            $folder->update(['path' => $folderPath]);
+
+            Storage::disk('public')->makeDirectory($path);
+
+            $folder->update(['path' => $path]);
 
             return response()->json([
                 'isSuccess' => true,
@@ -126,145 +148,10 @@ class FileRepositoryController extends Controller
         }
     }
 
-    /**
-     * ✏️ Update an existing folder
-     */
-    public function updateFolder(Request $request, $folderId)
-    {
-        try {
-            $user = auth()->user();
-
-            $folder = Folder::where('id', $folderId)
-                ->where('user_id', $user->id)
-                ->first();
-
-            if (!$folder) {
-                return response()->json([
-                    'isSuccess' => false,
-                    'message' => 'Folder not found or you do not have permission.',
-                ], 404);
-            }
-
-            $validated = $request->validate([
-                'folder_name' => 'required|string|max:255',
-                'parent_id' => 'nullable|exists:folders,id',
-            ]);
-
-            // Build new folder path
-            $userFolderPrefix = 'user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
-
-            if (!empty($validated['parent_id'])) {
-                $parentFolder = Folder::find($validated['parent_id']);
-                if ($parentFolder) {
-                    $userFolderPrefix = $parentFolder->path;
-                }
-            }
-
-            $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
-            $newFolderPath = $userFolderPrefix . '/' . $safeFolderName;
-
-            // Rename folder in public if path changed
-            $oldPath = public_path($folder->path);
-            $newPath = public_path($newFolderPath);
-
-            if ($folder->path !== $newFolderPath && file_exists($oldPath)) {
-                rename($oldPath, $newPath);
-            } else {
-                // Ensure folder exists if it didn't previously
-                if (!file_exists($newPath)) {
-                    mkdir($newPath, 0755, true);
-                }
-            }
-
-            // Update DB record
-            $folder->update([
-                'folder_name' => $validated['folder_name'],
-                'parent_id' => $validated['parent_id'] ?? null,
-                'path' => $newFolderPath,
-            ]);
-
-            return response()->json([
-                'isSuccess' => true,
-                'message' => 'Folder updated successfully.',
-                'data' => $folder,
-            ]);
-        } catch (Exception $e) {
-            Log::error('Error updating folder: ' . $e->getMessage());
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Failed to update folder.',
-            ], 500);
-        }
-    }
 
 
     /**
-     * ✏️ Update file name
-     */
-    public function updateFile(Request $request, $fileId)
-    {
-        try {
-            $user = auth()->user();
-
-            $file = File::where('id', $fileId)
-                ->where('user_id', $user->id)
-                ->first();
-
-            if (!$file) {
-                return response()->json([
-                    'isSuccess' => false,
-                    'message' => 'File not found or you do not have permission.',
-                ], 404);
-            }
-
-            $validated = $request->validate([
-                'file_name' => 'required|string|max:255',
-            ]);
-
-            $oldFilePath = public_path($file->file_path);
-            $directory = dirname($oldFilePath);
-            $extension = pathinfo($oldFilePath, PATHINFO_EXTENSION);
-
-            // Generate new safe file name
-            $safeFileName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $validated['file_name']);
-            if ($extension) {
-                $safeFileName .= '.' . $extension;
-            }
-
-            $newFilePath = $directory . '/' . $safeFileName;
-
-            // Rename the file in the public folder
-            if (file_exists($oldFilePath)) {
-                rename($oldFilePath, $newFilePath);
-            }
-
-            // Update DB record
-            $file->update([
-                'file_name' => $validated['file_name'],
-                'file_path' => str_replace(public_path() . '/', '', $newFilePath),
-            ]);
-
-            // Add file URL for frontend
-            $file->file_url = asset($file->file_path);
-
-            return response()->json([
-                'isSuccess' => true,
-                'message' => 'File updated successfully.',
-                'data' => $file,
-            ]);
-        } catch (Exception $e) {
-            Log::error('Error updating file: ' . $e->getMessage());
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Failed to update file.',
-            ], 500);
-        }
-    }
-
-
-
-    /**
-     * ⬆ Upload a file to public folder
+     * ⬆ Upload a file
      */
     public function uploadFile(Request $request)
     {
@@ -273,33 +160,34 @@ class FileRepositoryController extends Controller
 
             $validated = $request->validate([
                 'folder_id' => 'nullable|exists:folders,id',
-                'file' => 'required|file|max:10240', // 10MB
+                'file' => 'required|file|max:10240', // 10MB limit
             ]);
 
-            $folderPath = 'user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
+            $file = $request->file('file');
+
+            // Always sanitize user name
+            $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
+            $folderPath = 'user_' . $safeUserName; // default to user's root folder
 
             if (!empty($validated['folder_id'])) {
                 $folder = Folder::where('id', $validated['folder_id'])
                     ->where('user_id', $user->id)
                     ->first();
+
                 if ($folder) {
-                    $folderPath = $folder->path;
+                    // Make sure we include the subfolder name
+                    $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $folder->folder_name);
+                    $folderPath = ($folder->path ?? $folderPath) . '/' . $safeFolderName;
                 }
             }
 
-            // Save file using helper
-            $filePath = $this->saveFileToPublic($request, 'file', $folderPath);
+            // Ensure the folder exists in storage
+            Storage::disk('public')->makeDirectory($folderPath);
 
-            if (!$filePath) {
-                return response()->json([
-                    'isSuccess' => false,
-                    'message' => 'No file uploaded.',
-                ], 400);
-            }
+            // Store the file inside the correct folder
+            $filePath = $file->store($folderPath, 'public');
 
-            $file = $request->file('file');
-
-            // Save DB record
+            // Save file info in DB
             $newFile = File::create([
                 'user_id' => $user->id,
                 'folder_id' => $validated['folder_id'] ?? null,
@@ -310,7 +198,8 @@ class FileRepositoryController extends Controller
                 'is_archived' => false,
             ]);
 
-            $newFile->file_url = asset($filePath);
+            // Add public asset URL for frontend
+            $newFile->file_url = asset('storage/' . $filePath);
 
             return response()->json([
                 'isSuccess' => true,
@@ -326,14 +215,54 @@ class FileRepositoryController extends Controller
         }
     }
 
+
+    /**
+     * 🗑️ Delete a file or folder
+     */
+    // public function deleteItem(Request $request)
+    // {
+    //     try {
+    //         $validated = $request->validate([
+    //             'type' => 'required|in:file,folder',
+    //             'id' => 'required|integer',
+    //         ]);
+
+    //         if ($validated['type'] === 'file') {
+    //             $file = File::find($validated['id']);
+    //             if ($file) {
+    //                 $file->update(['is_archived' => true]);
+    //             }
+    //         } else {
+    //             $folder = Folder::find($validated['id']);
+    //             if ($folder) {
+    //                 $folder->update(['is_archived' => true]);
+    //             }
+    //         }
+
+    //         return response()->json([
+    //             'isSuccess' => true,
+    //             'message' => ucfirst($validated['type']) . ' archived successfully.',
+    //         ]);
+    //     } catch (Exception $e) {
+    //         Log::error('Error archiving item: ' . $e->getMessage());
+    //         return response()->json([
+    //             'isSuccess' => false,
+    //             'message' => 'Failed to archive item.',
+    //         ], 500);
+    //     }
+    // }
+
+
     /**
      * ⬇ Download a file
      */
     public function downloadFile($fileId)
     {
         try {
-            $file = File::findOrFail($fileId);
-            $filePath = public_path($file->file_path);
+            $file = File::where('id', $fileId)
+                ->firstOrFail();
+
+            $filePath = storage_path('app/public/' . $file->file_path);
 
             if (!file_exists($filePath)) {
                 return response()->json([
@@ -349,146 +278,6 @@ class FileRepositoryController extends Controller
                 'isSuccess' => false,
                 'message' => 'Failed to download file.',
             ], 500);
-        }
-    }
-
-
-    /**
-     * 🗑 Delete a folder (and all its children + files)
-     */
-    public function deleteFolder($folderId)
-    {
-        try {
-            $user = auth()->user();
-
-            $folder = Folder::where('id', $folderId)
-                ->where('user_id', $user->id)
-                ->first();
-
-            if (!$folder) {
-                return response()->json([
-                    'isSuccess' => false,
-                    'message' => 'Folder not found or you do not have permission.',
-                ], 404);
-            }
-
-            // Recursive function to delete folder contents
-            $deleteFolderRecursively = function ($folder) use (&$deleteFolderRecursively) {
-                // Delete child folders
-                foreach ($folder->children as $child) {
-                    $deleteFolderRecursively($child);
-                }
-
-                // Delete files in this folder
-                foreach ($folder->files as $file) {
-                    $filePath = public_path($file->file_path);
-                    if (file_exists($filePath)) {
-                        unlink($filePath);
-                    }
-                    $file->delete();
-                }
-
-                // Delete folder from public folder
-                if ($folder->path && file_exists(public_path($folder->path))) {
-                    rmdir($folder->path);
-                }
-
-                // Delete folder from DB
-                $folder->delete();
-            };
-
-            // Load children and files before deleting
-            $folder->load(['children', 'files']);
-            $deleteFolderRecursively($folder);
-
-            return response()->json([
-                'isSuccess' => true,
-                'message' => 'Folder deleted successfully.',
-            ]);
-        } catch (Exception $e) {
-            Log::error('Error deleting folder: ' . $e->getMessage());
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Failed to delete folder.',
-            ], 500);
-        }
-    }
-
-
-    /**
-     * 🗑 Delete a file
-     */
-    public function deleteFile($fileId)
-    {
-        try {
-            $user = auth()->user();
-
-            $file = File::where('id', $fileId)
-                ->where('user_id', $user->id)
-                ->first();
-
-            if (!$file) {
-                return response()->json([
-                    'isSuccess' => false,
-                    'message' => 'File not found or you do not have permission.',
-                ], 404);
-            }
-
-            $filePath = public_path($file->file_path);
-
-            // Delete the file from public folder
-            if (file_exists($filePath)) {
-                unlink($filePath);
-            }
-
-            // Delete the file record from DB
-            $file->delete();
-
-            return response()->json([
-                'isSuccess' => true,
-                'message' => 'File deleted successfully.',
-            ]);
-        } catch (Exception $e) {
-            Log::error('Error deleting file: ' . $e->getMessage());
-            return response()->json([
-                'isSuccess' => false,
-                'message' => 'Failed to delete file.',
-            ], 500);
-        }
-    }
-
-
-
-    /**
-     * Helper: save uploaded file to public dynamically
-     */
-    private function saveFileToPublic(Request $request, $field, $folderPath)
-    {
-        if ($request->hasFile($field)) {
-            $file = $request->file($field);
-
-            $directory = public_path($folderPath);
-            if (!file_exists($directory)) {
-                mkdir($directory, 0755, true);
-            }
-
-            $filename = uniqid() . '_' . preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $file->getClientOriginalName());
-            $file->move($directory, $filename);
-
-            return $folderPath . '/' . $filename;
-        }
-
-        return null;
-    }
-
-    /**
-     * Helper: create a folder in public dynamically
-     */
-    private function makePublicFolder($folderPath)
-    {
-        $directory = public_path($folderPath);
-        if (!file_exists($directory)) {
-            mkdir($directory, 0755, true);
         }
     }
 }
