@@ -340,11 +340,11 @@ class FileRepositoryController extends Controller
                 'file_name' => 'required|string|max:255',
             ]);
 
-            $oldFilePath = public_path($file->file_path);
+            $oldFilePath = storage_path('app/public/' . $file->file_path);
             $directory = dirname($oldFilePath);
             $extension = pathinfo($oldFilePath, PATHINFO_EXTENSION);
 
-            // Generate new safe file name
+            // Generate safe new file name
             $safeFileName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $validated['file_name']);
             if ($extension) {
                 $safeFileName .= '.' . $extension;
@@ -352,19 +352,21 @@ class FileRepositoryController extends Controller
 
             $newFilePath = $directory . '/' . $safeFileName;
 
-            // Rename the file in the public folder
+            // Rename the file
             if (file_exists($oldFilePath)) {
                 rename($oldFilePath, $newFilePath);
             }
 
-            // Update DB record
+            // Save relative path (from storage/app/public)
+            $relativePath = str_replace(storage_path('app/public/') . '', '', $newFilePath);
+
             $file->update([
                 'file_name' => $validated['file_name'],
-                'file_path' => str_replace(public_path() . '/', '', $newFilePath),
+                'file_path' => $relativePath,
             ]);
 
             // Add file URL for frontend
-            $file->file_url = asset($file->file_path);
+            $file->file_url = asset('storage/' . $file->file_path);
 
             return response()->json([
                 'isSuccess' => true,
