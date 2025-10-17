@@ -406,7 +406,7 @@ class FileRepositoryController extends Controller
                 'parent_id' => 'nullable|exists:folders,id',
             ]);
 
-            // Determine the prefix path
+            // Determine prefix path
             $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
             $userFolderPrefix = 'user_' . $safeUserName;
 
@@ -420,26 +420,30 @@ class FileRepositoryController extends Controller
             $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
             $newFolderPath = $userFolderPrefix . '/' . $safeFolderName;
 
-            $oldPath = storage_path('app/public/' . $folder->path);
-            $newPath = storage_path('app/public/' . $newFolderPath);
+            $oldFullPath = $folder->path
+                ? storage_path('app/public/' . $folder->path)
+                : storage_path('app/public/user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name) . '/' . $safeFolderName);
 
-            // Rename folder if it exists
-            if ($folder->path !== $newFolderPath && file_exists($oldPath)) {
-                rename($oldPath, $newPath);
+            $newFullPath = storage_path('app/public/' . $newFolderPath);
+
+            // Only rename if the old folder exists
+            if ($folder->path && $folder->path !== $newFolderPath && file_exists($oldFullPath)) {
+                if (!rename($oldFullPath, $newFullPath)) {
+                    throw new \Exception("Failed to rename folder. Check folder permissions.");
+                }
             } else {
-                // Ensure folder exists if it didn't previously
-                if (!file_exists($newPath)) {
-                    mkdir($newPath, 0755, true);
+                // Ensure folder exists
+                if (!file_exists($newFullPath)) {
+                    mkdir($newFullPath, 0755, true);
                 }
             }
 
-            // Save relative path
-            $relativePath = str_replace(storage_path('app/public/'), '', $newPath);
 
+            // Save relative path
             $folder->update([
                 'folder_name' => $validated['folder_name'],
                 'parent_id' => $validated['parent_id'] ?? null,
-                'path' => $relativePath,
+                'path' => $newFolderPath,
             ]);
 
             return response()->json([
@@ -447,11 +451,11 @@ class FileRepositoryController extends Controller
                 'message' => 'Folder updated successfully.',
                 'data' => $folder,
             ]);
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             Log::error('Error updating folder: ' . $e->getMessage());
             return response()->json([
                 'isSuccess' => false,
-                'message' => 'Failed to update folder.',
+                'message' => 'Failed to update folder. ' . $e->getMessage(),
             ], 500);
         }
     }
