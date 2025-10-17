@@ -152,7 +152,7 @@ class PrincipalController extends Controller
     {
         try {
             $pendingUsers = User::where('is_approved', false)
-                ->select('id', 'first_name', 'last_name', 'full_name', 'email', 'role', 'created_at')
+                ->select('id', 'full_name', 'email', 'role', 'created_at')
                 ->get();
 
             return response()->json([
