@@ -467,10 +467,10 @@ class FileRepositoryController extends Controller
     public function viewFile($fileId)
     {
         try {
-            $user = auth()->user();
+
 
             $file = File::where('id', $fileId)
-                ->where('user_id', $user->id)
+
                 ->first();
 
             if (!$file) {

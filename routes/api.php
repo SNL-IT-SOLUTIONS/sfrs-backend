@@ -49,9 +49,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('update/files/{fileId}', [FileRepositoryController::class, 'updateFile']);
     Route::delete('folders/{folderId}', [FileRepositoryController::class, 'deleteFolder']);
     Route::delete('files/{fileId}', [FileRepositoryController::class, 'deleteFile']);
-    Route::get('preview/files/{fileId}', [FileRepositoryController::class, 'viewFile']);
 });
 Route::get('download/{fileId}', [FileRepositoryController::class, 'downloadFile']);
+Route::get('preview/files/{fileId}', [FileRepositoryController::class, 'viewFile']);
 
 //Principal
 Route::middleware(['auth:sanctum'])->group(function () {
