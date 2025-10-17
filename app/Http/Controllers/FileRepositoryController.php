@@ -352,6 +352,113 @@ class FileRepositoryController extends Controller
         }
     }
 
+
+    /**
+     * 🗑 Delete a folder (and all its children + files)
+     */
+    public function deleteFolder($folderId)
+    {
+        try {
+            $user = auth()->user();
+
+            $folder = Folder::where('id', $folderId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$folder) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Folder not found or you do not have permission.',
+                ], 404);
+            }
+
+            // Recursive function to delete folder contents
+            $deleteFolderRecursively = function ($folder) use (&$deleteFolderRecursively) {
+                // Delete child folders
+                foreach ($folder->children as $child) {
+                    $deleteFolderRecursively($child);
+                }
+
+                // Delete files in this folder
+                foreach ($folder->files as $file) {
+                    $filePath = public_path($file->file_path);
+                    if (file_exists($filePath)) {
+                        unlink($filePath);
+                    }
+                    $file->delete();
+                }
+
+                // Delete folder from public folder
+                if ($folder->path && file_exists(public_path($folder->path))) {
+                    rmdir($folder->path);
+                }
+
+                // Delete folder from DB
+                $folder->delete();
+            };
+
+            // Load children and files before deleting
+            $folder->load(['children', 'files']);
+            $deleteFolderRecursively($folder);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Folder deleted successfully.',
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error deleting folder: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to delete folder.',
+            ], 500);
+        }
+    }
+
+
+    /**
+     * 🗑 Delete a file
+     */
+    public function deleteFile($fileId)
+    {
+        try {
+            $user = auth()->user();
+
+            $file = File::where('id', $fileId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$file) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found or you do not have permission.',
+                ], 404);
+            }
+
+            $filePath = public_path($file->file_path);
+
+            // Delete the file from public folder
+            if (file_exists($filePath)) {
+                unlink($filePath);
+            }
+
+            // Delete the file record from DB
+            $file->delete();
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'File deleted successfully.',
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error deleting file: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to delete file.',
+            ], 500);
+        }
+    }
+
+
+
     /**
      * Helper: save uploaded file to public dynamically
      */
