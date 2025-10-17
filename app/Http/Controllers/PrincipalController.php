@@ -15,90 +15,62 @@ class PrincipalController extends Controller
     /**
      * View all uploaded files in the repository (across all users)
      */
-    public function viewAllRepositories()
+    public function viewAllRepositories(Request $request)
     {
         try {
-            // Fetch all folders from all users (root level)
-            $folders = Folder::whereNull('parent_id')
-                ->with([
-                    'children' => function ($query) {
-                        $query->with([
-                            'files',
-                            'children' => function ($subQuery) {
-                                $subQuery->with('files'); // recursion level 2
-                            },
-                            'user'
-                        ]);
-                    },
-                    'files',
-                    'user' // include user info
-                ])
-                ->get();
+            $search = $request->query('search');
+            $perPage = $request->query('per_page', 10);
+            $cursor = $request->query('cursor');
 
-            // Fetch all root files (not inside any folder)
-            $rootFiles = File::whereNull('folder_id')
-                ->with('user')
-                ->get();
+            // Folders query
+            $foldersQuery = Folder::with(['children.files', 'files', 'user'])
+                ->whereNull('parent_id');
 
-            // Attach URLs and user full names
-            $folders->each(function ($folder) {
-                $user = $folder->user;
-                $folder->user_full_name = $user ? $user->full_name : 'Unknown User';
+            // Files query (root files only)
+            $filesQuery = File::with('user')->whereNull('folder_id');
 
-                $userFolderPrefix = $user
-                    ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
-                    : '';
-
-                $cleanFolderPath = str_replace($userFolderPrefix, '', $folder->path ?? '');
-                $folder->folder_url = asset('storage/' . $cleanFolderPath);
-
-                // Folder files
-                $folder->files->each(function ($file) use ($userFolderPrefix, $user) {
-                    $file->user_full_name = $user ? $user->full_name : 'Unknown User';
-                    $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
-                    $file->file_url = asset('storage/' . $cleanPath);
+            if ($search) {
+                // Search folders by name, user full_name, or role
+                $foldersQuery->where(function ($q) use ($search) {
+                    $q->where('folder_name', 'like', "%{$search}%")
+                        ->orWhereHas('user', fn($u) => $u->where('full_name', 'like', "%{$search}%")
+                            ->orWhere('role', 'like', "%{$search}%"));
                 });
 
-                // Child folders
-                $folder->children->each(function ($child) use ($userFolderPrefix) {
-                    $childUser = $child->user;
-                    $child->user_full_name = $childUser ? $childUser->full_name : 'Unknown User';
+                // Search root files by name, user full_name, or role
+                $filesQuery->where(function ($q) use ($search) {
+                    $q->where('file_name', 'like', "%{$search}%")
+                        ->orWhereHas('user', fn($u) => $u->where('full_name', 'like', "%{$search}%")
+                            ->orWhere('role', 'like', "%{$search}%"));
+                });
+            }
 
-                    $cleanChildPath = str_replace($userFolderPrefix, '', $child->path ?? '');
-                    $child->folder_url = asset('storage/' . $cleanChildPath);
+            // Cursor pagination
+            $folders = $foldersQuery->orderBy('id')->cursorPaginate($perPage, ['*'], 'cursor', $cursor);
+            $files = $filesQuery->orderBy('id')->cursorPaginate($perPage, ['*'], 'cursor', $cursor);
 
-                    $child->files->each(function ($file) use ($userFolderPrefix, $childUser) {
-                        $file->user_full_name = $childUser ? $childUser->full_name : 'Unknown User';
-                        $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
-                        $file->file_url = asset('storage/' . $cleanPath);
-                    });
+            // Attach URLs
+            $folders->getCollection()->each(function ($folder) {
+                $folder->folder_url = asset($folder->path ?? '');
+                $folder->files->each(fn($f) => $f->file_url = asset($f->file_path));
+                $folder->children->each(function ($child) {
+                    $child->folder_url = asset($child->path ?? '');
+                    $child->files->each(fn($f) => $f->file_url = asset($f->file_path));
                 });
             });
 
-            // Attach URLs and user names for root files
-            $rootFiles->each(function ($file) {
-                $user = $file->user;
-                $file->user_full_name = $user ? $user->full_name : 'Unknown User';
-
-                $userFolderPrefix = $user
-                    ? 'user_' . str_replace(' ', '_', $user->first_name . '_' . $user->last_name) . '/'
-                    : '';
-
-                $cleanPath = str_replace($userFolderPrefix, '', $file->file_path);
-                $file->file_url = asset('storage/' . $cleanPath);
-            });
+            $files->getCollection()->each(fn($f) => $f->file_url = asset($f->file_path));
 
             return response()->json([
                 'isSuccess' => true,
                 'message' => 'All repositories loaded successfully.',
                 'data' => [
                     'folders' => $folders,
-                    'files' => $rootFiles,
+                    'files' => $files,
                 ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching all repositories: ' . $e->getMessage());
-
             return response()->json([
                 'isSuccess' => false,
                 'message' => 'Failed to load repositories.',

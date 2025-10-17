@@ -127,6 +127,78 @@ class FileRepositoryController extends Controller
     }
 
     /**
+     * ✏️ Update an existing folder
+     */
+    public function updateFolder(Request $request, $folderId)
+    {
+        try {
+            $user = auth()->user();
+
+            $folder = Folder::where('id', $folderId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$folder) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Folder not found or you do not have permission.',
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'folder_name' => 'required|string|max:255',
+                'parent_id' => 'nullable|exists:folders,id',
+            ]);
+
+            // Build new folder path
+            $userFolderPrefix = 'user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
+
+            if (!empty($validated['parent_id'])) {
+                $parentFolder = Folder::find($validated['parent_id']);
+                if ($parentFolder) {
+                    $userFolderPrefix = $parentFolder->path;
+                }
+            }
+
+            $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
+            $newFolderPath = $userFolderPrefix . '/' . $safeFolderName;
+
+            // Rename folder in public if path changed
+            $oldPath = public_path($folder->path);
+            $newPath = public_path($newFolderPath);
+
+            if ($folder->path !== $newFolderPath && file_exists($oldPath)) {
+                rename($oldPath, $newPath);
+            } else {
+                // Ensure folder exists if it didn't previously
+                if (!file_exists($newPath)) {
+                    mkdir($newPath, 0755, true);
+                }
+            }
+
+            // Update DB record
+            $folder->update([
+                'folder_name' => $validated['folder_name'],
+                'parent_id' => $validated['parent_id'] ?? null,
+                'path' => $newFolderPath,
+            ]);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Folder updated successfully.',
+                'data' => $folder,
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error updating folder: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to update folder.',
+            ], 500);
+        }
+    }
+
+
+    /**
      * ⬆ Upload a file to public folder
      */
     public function uploadFile(Request $request)
