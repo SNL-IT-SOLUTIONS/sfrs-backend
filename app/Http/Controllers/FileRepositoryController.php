@@ -406,38 +406,40 @@ class FileRepositoryController extends Controller
                 'parent_id' => 'nullable|exists:folders,id',
             ]);
 
-            // Build new folder path
+            // Determine the prefix path
             $safeUserName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
             $userFolderPrefix = 'user_' . $safeUserName;
 
             if (!empty($validated['parent_id'])) {
                 $parentFolder = Folder::find($validated['parent_id']);
                 if ($parentFolder) {
-                    $userFolderPrefix = $parentFolder->path; // keep relative path
+                    $userFolderPrefix = $parentFolder->path; // relative path
                 }
             }
 
             $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
             $newFolderPath = $userFolderPrefix . '/' . $safeFolderName;
 
-            // Paths on disk
             $oldPath = storage_path('app/public/' . $folder->path);
             $newPath = storage_path('app/public/' . $newFolderPath);
 
-            // Rename folder if needed
+            // Rename folder if it exists
             if ($folder->path !== $newFolderPath && file_exists($oldPath)) {
                 rename($oldPath, $newPath);
             } else {
+                // Ensure folder exists if it didn't previously
                 if (!file_exists($newPath)) {
                     mkdir($newPath, 0755, true);
                 }
             }
 
-            // Update DB record with relative path
+            // Save relative path
+            $relativePath = str_replace(storage_path('app/public/'), '', $newPath);
+
             $folder->update([
                 'folder_name' => $validated['folder_name'],
                 'parent_id' => $validated['parent_id'] ?? null,
-                'path' => $newFolderPath,
+                'path' => $relativePath,
             ]);
 
             return response()->json([
@@ -453,6 +455,7 @@ class FileRepositoryController extends Controller
             ], 500);
         }
     }
+
 
 
 
