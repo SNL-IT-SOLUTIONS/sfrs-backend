@@ -453,17 +453,15 @@ class FileRepositoryController extends Controller
 
 
 
-
-
     /**
      * ⬇ Download a file
      */
     public function downloadFile($fileId)
     {
         try {
-            $file = File::where('id', $fileId)
-                ->firstOrFail();
+            $file = File::findOrFail($fileId);
 
+            // Use Storage path correctly
             $filePath = storage_path('app/public/' . $file->file_path);
 
             if (!file_exists($filePath)) {
@@ -473,6 +471,7 @@ class FileRepositoryController extends Controller
                 ], 404);
             }
 
+            // Serve file
             return response()->download($filePath, $file->file_name);
         } catch (Exception $e) {
             Log::error('Error downloading file: ' . $e->getMessage());
