@@ -215,42 +215,244 @@ class FileRepositoryController extends Controller
         }
     }
 
+    /**
+     * 🗑 Delete a file
+     */
+    public function deleteFile($fileId)
+    {
+        try {
+            $user = auth()->user();
+
+            $file = File::where('id', $fileId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$file) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found or you do not have permission.',
+                ], 404);
+            }
+
+            $filePath = public_path($file->file_path);
+
+            // Delete the file from public folder
+            if (file_exists($filePath)) {
+                unlink($filePath);
+            }
+
+            // Delete the file record from DB
+            $file->delete();
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'File deleted successfully.',
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error deleting file: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to delete file.',
+            ], 500);
+        }
+    }
+    /**
+     * 🗑 Delete a folder (and all its children + files)
+     */
+    public function deleteFolder($folderId)
+    {
+        try {
+            $user = auth()->user();
+
+            $folder = Folder::where('id', $folderId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$folder) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Folder not found or you do not have permission.',
+                ], 404);
+            }
+
+            // Recursive function to delete folder contents
+            $deleteFolderRecursively = function ($folder) use (&$deleteFolderRecursively) {
+                // Delete child folders
+                foreach ($folder->children as $child) {
+                    $deleteFolderRecursively($child);
+                }
+
+                // Delete files in this folder
+                foreach ($folder->files as $file) {
+                    $filePath = public_path($file->file_path);
+                    if (file_exists($filePath)) {
+                        unlink($filePath);
+                    }
+                    $file->delete();
+                }
+
+                // Delete folder from public folder
+                if ($folder->path && file_exists(public_path($folder->path))) {
+                    rmdir($folder->path);
+                }
+
+                // Delete folder from DB
+                $folder->delete();
+            };
+
+            // Load children and files before deleting
+            $folder->load(['children', 'files']);
+            $deleteFolderRecursively($folder);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Folder deleted successfully.',
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error deleting folder: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to delete folder.',
+            ], 500);
+        }
+    }
 
     /**
-     * 🗑️ Delete a file or folder
+     * ✏️ Update file name
      */
-    // public function deleteItem(Request $request)
-    // {
-    //     try {
-    //         $validated = $request->validate([
-    //             'type' => 'required|in:file,folder',
-    //             'id' => 'required|integer',
-    //         ]);
+    public function updateFile(Request $request, $fileId)
+    {
+        try {
+            $user = auth()->user();
 
-    //         if ($validated['type'] === 'file') {
-    //             $file = File::find($validated['id']);
-    //             if ($file) {
-    //                 $file->update(['is_archived' => true]);
-    //             }
-    //         } else {
-    //             $folder = Folder::find($validated['id']);
-    //             if ($folder) {
-    //                 $folder->update(['is_archived' => true]);
-    //             }
-    //         }
+            $file = File::where('id', $fileId)
+                ->where('user_id', $user->id)
+                ->first();
 
-    //         return response()->json([
-    //             'isSuccess' => true,
-    //             'message' => ucfirst($validated['type']) . ' archived successfully.',
-    //         ]);
-    //     } catch (Exception $e) {
-    //         Log::error('Error archiving item: ' . $e->getMessage());
-    //         return response()->json([
-    //             'isSuccess' => false,
-    //             'message' => 'Failed to archive item.',
-    //         ], 500);
-    //     }
-    // }
+            if (!$file) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found or you do not have permission.',
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'file_name' => 'required|string|max:255',
+            ]);
+
+            $oldFilePath = public_path($file->file_path);
+            $directory = dirname($oldFilePath);
+            $extension = pathinfo($oldFilePath, PATHINFO_EXTENSION);
+
+            // Generate new safe file name
+            $safeFileName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $validated['file_name']);
+            if ($extension) {
+                $safeFileName .= '.' . $extension;
+            }
+
+            $newFilePath = $directory . '/' . $safeFileName;
+
+            // Rename the file in the public folder
+            if (file_exists($oldFilePath)) {
+                rename($oldFilePath, $newFilePath);
+            }
+
+            // Update DB record
+            $file->update([
+                'file_name' => $validated['file_name'],
+                'file_path' => str_replace(public_path() . '/', '', $newFilePath),
+            ]);
+
+            // Add file URL for frontend
+            $file->file_url = asset($file->file_path);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'File updated successfully.',
+                'data' => $file,
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error updating file: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to update file.',
+            ], 500);
+        }
+    }
+
+    /**
+     * ✏️ Update an existing folder
+     */
+    public function updateFolder(Request $request, $folderId)
+    {
+        try {
+            $user = auth()->user();
+
+            $folder = Folder::where('id', $folderId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$folder) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'Folder not found or you do not have permission.',
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'folder_name' => 'required|string|max:255',
+                'parent_id' => 'nullable|exists:folders,id',
+            ]);
+
+            // Build new folder path
+            $userFolderPrefix = 'user_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $user->full_name);
+
+            if (!empty($validated['parent_id'])) {
+                $parentFolder = Folder::find($validated['parent_id']);
+                if ($parentFolder) {
+                    $userFolderPrefix = $parentFolder->path;
+                }
+            }
+
+            $safeFolderName = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $validated['folder_name']);
+            $newFolderPath = $userFolderPrefix . '/' . $safeFolderName;
+
+            // Rename folder in public if path changed
+            $oldPath = public_path($folder->path);
+            $newPath = public_path($newFolderPath);
+
+            if ($folder->path !== $newFolderPath && file_exists($oldPath)) {
+                rename($oldPath, $newPath);
+            } else {
+                // Ensure folder exists if it didn't previously
+                if (!file_exists($newPath)) {
+                    mkdir($newPath, 0755, true);
+                }
+            }
+
+            // Update DB record
+            $folder->update([
+                'folder_name' => $validated['folder_name'],
+                'parent_id' => $validated['parent_id'] ?? null,
+                'path' => $newFolderPath,
+            ]);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'Folder updated successfully.',
+                'data' => $folder,
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error updating folder: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to update folder.',
+            ], 500);
+        }
+    }
+
+
+
 
 
     /**
