@@ -461,6 +461,51 @@ class FileRepositoryController extends Controller
     }
 
 
+    /**
+     * 👀 View file in browser (inline)
+     */
+    public function viewFile($fileId)
+    {
+        try {
+            $user = auth()->user();
+
+            $file = File::where('id', $fileId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$file) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found or you do not have permission.',
+                ], 404);
+            }
+
+            $filePath = storage_path('app/public/' . $file->file_path);
+
+            if (!file_exists($filePath)) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found.',
+                ], 404);
+            }
+
+            // Return the file inline (not download)
+            return response()->file($filePath, [
+                'Content-Type' => $file->file_type,
+                'Content-Disposition' => 'inline; filename="' . $file->file_name . '"'
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error viewing file: ' . $e->getMessage());
+
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to view file.',
+            ], 500);
+        }
+    }
+
+
+
 
 
 
