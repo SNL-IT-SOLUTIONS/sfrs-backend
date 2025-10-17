@@ -259,10 +259,8 @@ class FileRepositoryController extends Controller
     public function downloadFile($fileId)
     {
         try {
-            $user = auth()->user();
 
             $file = File::where('id', $fileId)
-                ->where('user_id', $user->id)
                 ->firstOrFail();
 
             $filePath = storage_path('app/public/' . $file->file_path);
