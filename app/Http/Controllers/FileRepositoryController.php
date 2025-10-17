@@ -199,6 +199,71 @@ class FileRepositoryController extends Controller
 
 
     /**
+     * ✏️ Update file name
+     */
+    public function updateFile(Request $request, $fileId)
+    {
+        try {
+            $user = auth()->user();
+
+            $file = File::where('id', $fileId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$file) {
+                return response()->json([
+                    'isSuccess' => false,
+                    'message' => 'File not found or you do not have permission.',
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'file_name' => 'required|string|max:255',
+            ]);
+
+            $oldFilePath = public_path($file->file_path);
+            $directory = dirname($oldFilePath);
+            $extension = pathinfo($oldFilePath, PATHINFO_EXTENSION);
+
+            // Generate new safe file name
+            $safeFileName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $validated['file_name']);
+            if ($extension) {
+                $safeFileName .= '.' . $extension;
+            }
+
+            $newFilePath = $directory . '/' . $safeFileName;
+
+            // Rename the file in the public folder
+            if (file_exists($oldFilePath)) {
+                rename($oldFilePath, $newFilePath);
+            }
+
+            // Update DB record
+            $file->update([
+                'file_name' => $validated['file_name'],
+                'file_path' => str_replace(public_path() . '/', '', $newFilePath),
+            ]);
+
+            // Add file URL for frontend
+            $file->file_url = asset($file->file_path);
+
+            return response()->json([
+                'isSuccess' => true,
+                'message' => 'File updated successfully.',
+                'data' => $file,
+            ]);
+        } catch (Exception $e) {
+            Log::error('Error updating file: ' . $e->getMessage());
+            return response()->json([
+                'isSuccess' => false,
+                'message' => 'Failed to update file.',
+            ], 500);
+        }
+    }
+
+
+
+    /**
      * ⬆ Upload a file to public folder
      */
     public function uploadFile(Request $request)
